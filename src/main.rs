@@ -5,6 +5,7 @@ use std::{
 
 const START_MSG_BYTES: usize = 2; // magic bytes 0x6969
 const LENGTH_BYTES: usize = 4; // using u32 for msg length
+const TYPE_BYTES: usize = 4; // using u32 for msg type
 
 fn main() {
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
@@ -19,11 +20,9 @@ fn main() {
         match port.read(serial_buf.as_mut_slice()) {
             Ok(t) => {
                 msg.extend_from_slice(&serial_buf[..t]);
-                // let out = msg.iter().map(|ch| format!("{ch:x}")).collect::<Vec<_>>().join(" ");
-                // println!("cur msg: {out}");
 
-                if msg.len() < START_MSG_BYTES + LENGTH_BYTES {
-                    // wait for msg header to be read
+                // wait for msg header to be read
+                if msg.len() < START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES {
                     continue;
                 }
 
@@ -32,24 +31,31 @@ fn main() {
                     panic!("invalid magic bytes");
                 }
 
-                let expected_msg_len: [u8; 4] = msg
-                    [START_MSG_BYTES..START_MSG_BYTES + LENGTH_BYTES]
+                let msg_len: [u8; 4] = msg[START_MSG_BYTES..START_MSG_BYTES + LENGTH_BYTES]
                     .try_into()
                     .unwrap();
-                let expected_msg_len = u32::from_le_bytes(expected_msg_len) as usize;
+                let msg_len = u32::from_le_bytes(msg_len) as usize;
 
-                if msg.len() < START_MSG_BYTES + LENGTH_BYTES + expected_msg_len {
+                let msg_type: [u8; 4] = msg
+                    [START_MSG_BYTES + LENGTH_BYTES..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES]
+                    .try_into()
+                    .unwrap();
+                let msg_type = u32::from_le_bytes(msg_type) as usize;
+
+                if msg.len() < START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len {
                     continue;
                 }
 
-                let out = msg[START_MSG_BYTES + LENGTH_BYTES
-                    ..START_MSG_BYTES + LENGTH_BYTES + expected_msg_len]
+                let out = msg[START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES
+                    ..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len]
                     .iter()
                     .map(|ch| format!("{ch:x}"))
                     .collect::<Vec<_>>()
                     .join(" ");
-                println!("done: {out}");
-                msg.drain(..START_MSG_BYTES + LENGTH_BYTES + expected_msg_len); // finished processing
+
+                println!("len = {msg_len}, type = {msg_type}, msg = {out}");
+                msg.drain(..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len);
+                // finished processing
             },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
