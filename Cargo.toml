@@ -10,3 +10,5 @@ repository = "https://github.com/MrPicklePinosaur/trainos_tui"
 [features]
 
 [dependencies]
+
+serialport = { version = "4.2" }
