@@ -19,11 +19,15 @@ const TYPE_BYTES: usize = 4; // using u32 for msg type
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().unwrap();
+
     let (tx, mut rx) = mpsc::channel::<SerialMessage>(32);
 
     tokio::spawn(serial_conn(tx));
 
-    let (mut ws_stream, _) = connect_async("").await.expect("Failed to connect");
+    let addr = std::env::var("SERVER_WS").expect("could not get env var for SERVER_WS");
+
+    let (mut ws_stream, _) = connect_async(addr).await.expect("Failed to connect");
     // let (ws_write, ws_read) = ws_stream.split();
 
     while let Some(serial_msg) = rx.recv().await {
@@ -32,7 +36,7 @@ async fn main() {
             1 => {
                 let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
                 println!("{sensor:?}");
-                ws_stream.send(format!("{sensor:?}").into()).await;
+                ws_stream.send(format!("{sensor:?}").into()).await.unwrap();
             },
             _ => {
                 eprintln!("invalid type {}", serial_msg.msg_type);
