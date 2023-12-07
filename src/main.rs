@@ -5,10 +5,12 @@ use std::{
     time::Duration,
 };
 
-use bincode::config::Options;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc,
+};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::protocol::*;
@@ -21,22 +23,31 @@ const TYPE_BYTES: usize = 4; // using u32 for msg type
 async fn main() {
     dotenv::dotenv().unwrap();
 
-    let (tx, mut rx) = mpsc::channel::<SerialMessage>(32);
-
-    tokio::spawn(serial_conn(tx));
+    let (serial_tx, mut serial_rx) = mpsc::channel::<SerialMessage>(32);
 
     let addr = std::env::var("SERVER_WS").expect("could not get env var for SERVER_WS");
 
-    let (mut ws_stream, _) = connect_async(addr).await.expect("Failed to connect");
-    // let (ws_write, ws_read) = ws_stream.split();
+    let (ws_stream, _) = connect_async(addr).await.expect("Failed to connect");
+    let (mut ws_tx, ws_rx) = ws_stream.split();
 
-    while let Some(serial_msg) = rx.recv().await {
+    tokio::spawn(serial_conn(serial_tx));
+
+    tokio::spawn(async move {
+        ws_rx
+            .for_each(|msg| async {
+                let data = msg.unwrap().into_data();
+                println!("from server {data:?}");
+            })
+            .await;
+    });
+
+    while let Some(serial_msg) = serial_rx.recv().await {
         // deserialize the binary data
         match serial_msg.msg_type {
             1 => {
                 let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
                 println!("{sensor:?}");
-                ws_stream.send(format!("{sensor:?}").into()).await.unwrap();
+                ws_tx.send(format!("{sensor:?}").into()).await.unwrap();
             },
             _ => {
                 eprintln!("invalid type {}", serial_msg.msg_type);
