@@ -6,8 +6,10 @@ use std::{
 };
 
 use bincode::config::Options;
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::protocol::*;
 
@@ -21,12 +23,16 @@ async fn main() {
 
     tokio::spawn(serial_conn(tx));
 
+    let (mut ws_stream, _) = connect_async("").await.expect("Failed to connect");
+    // let (ws_write, ws_read) = ws_stream.split();
+
     while let Some(serial_msg) = rx.recv().await {
         // deserialize the binary data
         match serial_msg.msg_type {
             1 => {
                 let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
                 println!("{sensor:?}");
+                ws_stream.send(format!("{sensor:?}").into()).await;
             },
             _ => {
                 eprintln!("invalid type {}", serial_msg.msg_type);
