@@ -23,14 +23,15 @@ const TYPE_BYTES: usize = 4; // using u32 for msg type
 async fn main() {
     dotenv::dotenv().unwrap();
 
-    let (serial_tx, mut serial_rx) = mpsc::channel::<SerialMessage>(32);
+    let (read_serial_tx, mut read_serial_rx) = mpsc::channel::<SerialMessage>(32);
+    let (write_serial_tx, mut write_serial_rx) = mpsc::channel::<SerialMessage>(32);
 
     let addr = std::env::var("SERVER_WS").expect("could not get env var for SERVER_WS");
 
     let (ws_stream, _) = connect_async(addr).await.expect("Failed to connect");
     let (mut ws_tx, ws_rx) = ws_stream.split();
 
-    tokio::spawn(serial_conn(serial_tx));
+    tokio::spawn(serial_conn(read_serial_tx, write_serial_rx));
 
     tokio::spawn(async move {
         ws_rx
@@ -44,6 +45,14 @@ async fn main() {
                     let train_speed_msg: TrainSpeedMsg =
                         serde_json::from_value(value.get("data").unwrap().clone()).unwrap();
                     println!("parsed {train_speed_msg:?}");
+
+                    let serial_msg = SerialMessage {
+                        data: bincode::serialize(&train_speed_msg).unwrap(),
+                        msg_type,
+                        msg_len: std::mem::size_of::<TrainSpeedMsg>() as u32,
+                    };
+
+                    write_serial_tx.send(serial_msg).await.unwrap();
                 } else {
                     eprintln!("invalid msg type from server {msg_type}");
                 }
@@ -51,7 +60,7 @@ async fn main() {
             .await;
     });
 
-    while let Some(serial_msg) = serial_rx.recv().await {
+    while let Some(serial_msg) = read_serial_rx.recv().await {
         // deserialize the binary data
         if serial_msg.msg_type == MsgType::Sensor as u32 {
             let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
@@ -64,13 +73,14 @@ async fn main() {
     }
 }
 
+#[derive(Debug)]
 pub struct SerialMessage {
     data: Vec<u8>,
     msg_len: u32,
     msg_type: u32,
 }
 
-async fn serial_conn(tx: mpsc::Sender<SerialMessage>) {
+async fn serial_conn(read: mpsc::Sender<SerialMessage>, mut write: mpsc::Receiver<SerialMessage>) {
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
         .timeout(Duration::from_millis(10))
         .open()
@@ -80,8 +90,31 @@ async fn serial_conn(tx: mpsc::Sender<SerialMessage>) {
     let mut serial_buf: Vec<u8> = vec![0; 1000];
     let mut msg: Vec<u8> = vec![];
     loop {
+        if let Ok(send_data) = write.try_recv() {
+            println!("send data {send_data:?}");
+
+            let mut raw_data: Vec<u8> = vec![69, 69];
+            raw_data.extend_from_slice(&send_data.msg_len.to_le_bytes());
+            raw_data.extend_from_slice(&send_data.msg_type.to_le_bytes());
+            raw_data.extend_from_slice(&send_data.data);
+
+            println!("send raw {raw_data:?}");
+
+            for i in 0..raw_data.len() {
+                port.write(&[raw_data[i]]).unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+
+            println!("done sending");
+        }
+
         match port.read(serial_buf.as_mut_slice()) {
             Ok(t) => {
+                if let Ok(data) = std::str::from_utf8(&serial_buf[..t]) {
+                    print!("{data}");
+                }
+
+                /*
                 msg.extend_from_slice(&serial_buf[..t]);
 
                 // wait for msg header to be read
@@ -126,10 +159,11 @@ async fn serial_conn(tx: mpsc::Sender<SerialMessage>) {
                     msg_len,
                     msg_type,
                 };
-                tx.send(serial_msg).await.unwrap();
+                read.send(serial_msg).await.unwrap();
 
                 // finished processing
                 msg.drain(..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len as usize);
+                */
             },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
