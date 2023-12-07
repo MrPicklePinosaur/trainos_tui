@@ -36,23 +36,30 @@ async fn main() {
         ws_rx
             .for_each(|msg| async {
                 let data = msg.unwrap().into_data();
-                println!("from server {data:?}");
+                let str_data = std::str::from_utf8(&data).unwrap();
+                let value: serde_json::Value = serde_json::from_str(str_data).unwrap();
+                let msg_type = value.get("type").unwrap().as_u64().unwrap() as u32;
+                println!("from server msg_type = {msg_type}, data = {str_data:?}");
+                if msg_type == MsgType::TrainSpeed as u32 {
+                    let train_speed_msg: TrainSpeedMsg =
+                        serde_json::from_value(value.get("data").unwrap().clone()).unwrap();
+                    println!("parsed {train_speed_msg:?}");
+                } else {
+                    eprintln!("invalid msg type from server {msg_type}");
+                }
             })
             .await;
     });
 
     while let Some(serial_msg) = serial_rx.recv().await {
         // deserialize the binary data
-        match serial_msg.msg_type {
-            1 => {
-                let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
-                let json_data = serde_json::to_string(&sensor).unwrap();
-                println!("{json_data:?}");
-                ws_tx.send(json_data.into()).await.unwrap();
-            },
-            _ => {
-                eprintln!("invalid type {}", serial_msg.msg_type);
-            },
+        if serial_msg.msg_type == MsgType::Sensor as u32 {
+            let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
+            let json_data = serde_json::to_string(&sensor).unwrap();
+            println!("{json_data:?}");
+            ws_tx.send(json_data.into()).await.unwrap();
+        } else {
+            eprintln!("invalid type {}", serial_msg.msg_type);
         }
     }
 }
