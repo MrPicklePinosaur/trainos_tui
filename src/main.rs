@@ -46,8 +46,9 @@ async fn main() {
         match serial_msg.msg_type {
             1 => {
                 let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
-                println!("{sensor:?}");
-                ws_tx.send(format!("{sensor:?}").into()).await.unwrap();
+                let json_data = serde_json::to_string(&sensor).unwrap();
+                println!("{json_data:?}");
+                ws_tx.send(json_data.into()).await.unwrap();
             },
             _ => {
                 eprintln!("invalid type {}", serial_msg.msg_type);
