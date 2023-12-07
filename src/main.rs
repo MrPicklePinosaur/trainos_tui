@@ -1,13 +1,22 @@
+mod protocol;
+
 use std::{
     io::{self, Write},
     time::Duration,
 };
+
+use bincode::config::Options;
+use serde::{Deserialize, Serialize};
+
+use crate::protocol::*;
 
 const START_MSG_BYTES: usize = 2; // magic bytes 0x6969
 const LENGTH_BYTES: usize = 4; // using u32 for msg length
 const TYPE_BYTES: usize = 4; // using u32 for msg type
 
 fn main() {
+    //let bincode_config = bincode::config::DefaultOptions::new().with_big_endian();
+
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
         .timeout(Duration::from_millis(10))
         .open()
@@ -46,16 +55,30 @@ fn main() {
                     continue;
                 }
 
-                let out = msg[START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES
-                    ..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len]
-                    .iter()
-                    .map(|ch| format!("{ch:x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                // let out = msg[START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES
+                //     ..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len]
+                //     .iter()
+                //     .map(|ch| format!("{ch:x}"))
+                //     .collect::<Vec<_>>()
+                //     .join(" ");
+                // println!("len = {msg_len}, type = {msg_type}, msg = {out}");
 
-                println!("len = {msg_len}, type = {msg_type}, msg = {out}");
-                msg.drain(..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len);
+                let out = &msg[START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES
+                    ..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len];
+
+                // deserialize the binary data
+                match msg_type {
+                    1 => {
+                        let sensor: SensorMsg = bincode::deserialize(&out).unwrap();
+                        println!("{sensor:?}");
+                    },
+                    _ => {
+                        eprintln!("invalid type {msg_type}");
+                    },
+                }
+
                 // finished processing
+                msg.drain(..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len);
             },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),

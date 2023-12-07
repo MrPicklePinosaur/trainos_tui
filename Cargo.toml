@@ -12,3 +12,6 @@ repository = "https://github.com/MrPicklePinosaur/trainos_tui"
 [dependencies]
 
 serialport = { version = "4.2" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+bincode = { version = "1.3" }
