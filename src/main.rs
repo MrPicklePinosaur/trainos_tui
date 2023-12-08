@@ -82,7 +82,7 @@ pub struct SerialMessage {
 
 async fn serial_conn(read: mpsc::Sender<SerialMessage>, mut write: mpsc::Receiver<SerialMessage>) {
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
-        .timeout(Duration::from_millis(10))
+        .timeout(Duration::ZERO)
         .open()
         .expect("Failed to open port");
 
@@ -102,12 +102,13 @@ async fn serial_conn(read: mpsc::Sender<SerialMessage>, mut write: mpsc::Receive
 
             for i in 0..raw_data.len() {
                 port.write(&[raw_data[i]]).unwrap();
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
 
             println!("done sending");
         }
 
+        // TODO busy polling, perhaps can seperate read and write to seperate tasks?
         match port.read(serial_buf.as_mut_slice()) {
             Ok(t) => {
                 if let Ok(data) = std::str::from_utf8(&serial_buf[..t]) {
