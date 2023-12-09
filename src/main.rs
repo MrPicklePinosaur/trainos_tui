@@ -2,14 +2,17 @@ mod protocol;
 
 use std::{
     io::{self, Write},
+    sync::Arc,
     time::Duration,
 };
 
 use futures_util::{pin_mut, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use serialport::SerialPort;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc,
+    sync::{mpsc, Mutex},
+    task,
 };
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -31,7 +34,15 @@ async fn main() {
     let (ws_stream, _) = connect_async(addr).await.expect("Failed to connect");
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
-    tokio::spawn(serial_conn(read_serial_tx, write_serial_rx));
+    let port = serialport::new("/dev/ttyUSB0", 115_200)
+        .timeout(Duration::from_millis(1))
+        .open()
+        .expect("Failed to open port");
+    let port = Arc::new(Mutex::new(port));
+
+    println!("{port:?}");
+
+    tokio::spawn(serial_conn(port.clone(), read_serial_tx));
 
     loop {
         tokio::select! {
@@ -64,23 +75,47 @@ async fn main() {
                         println!("DONE =========");
                     }
                 }
+            },
+            msg = read_serial_rx.recv() => {
+                match msg {
+                    Some(msg) => {
+                        // deserialize the binary data
+                        if msg.msg_type == MsgType::Sensor as u32 {
+                            let sensor: SensorMsg = bincode::deserialize(&msg.data).unwrap();
+                            let json_data = serde_json::to_string(&sensor).unwrap();
+                            println!("{json_data:?}");
+                            ws_tx.send(json_data.into()).await.unwrap();
+                        } else {
+                            eprintln!("invalid type {}", msg.msg_type);
+                        }
+                    }
+                    None => {
+
+                    }
+                }
+            },
+            msg = write_serial_rx.recv() => {
+
+                if let Some(send_data) = msg {
+                    println!("send data {send_data:?}");
+
+                    let mut raw_data: Vec<u8> = vec![69, 69];
+                    raw_data.extend_from_slice(&send_data.msg_len.to_le_bytes());
+                    raw_data.extend_from_slice(&send_data.msg_type.to_le_bytes());
+                    raw_data.extend_from_slice(&send_data.data);
+
+                    println!("send raw {raw_data:?}");
+
+                    for i in 0..raw_data.len() {
+                        port.lock().await.write(&[raw_data[i]]).unwrap();
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+
+                    println!("done sending");
+                }
             }
         }
     }
-
-    /*
-    while let Some(serial_msg) = read_serial_rx.recv().await {
-        // deserialize the binary data
-        if serial_msg.msg_type == MsgType::Sensor as u32 {
-            let sensor: SensorMsg = bincode::deserialize(&serial_msg.data).unwrap();
-            let json_data = serde_json::to_string(&sensor).unwrap();
-            println!("{json_data:?}");
-            ws_tx.send(json_data.into()).await.unwrap();
-        } else {
-            eprintln!("invalid type {}", serial_msg.msg_type);
-        }
-    }
-    */
 }
 
 #[derive(Debug)]
@@ -90,43 +125,17 @@ pub struct SerialMessage {
     msg_type: u32,
 }
 
-async fn serial_conn(read: mpsc::Sender<SerialMessage>, mut write: mpsc::Receiver<SerialMessage>) {
-    let mut port = serialport::new("/dev/ttyUSB0", 115_200)
-        .timeout(Duration::ZERO)
-        .open()
-        .expect("Failed to open port");
-
-    println!("{port:?}");
+async fn serial_conn(port: Arc<Mutex<Box<dyn SerialPort>>>, read: mpsc::Sender<SerialMessage>) {
     let mut serial_buf: Vec<u8> = vec![0; 1000];
     let mut msg: Vec<u8> = vec![];
     loop {
-        if let Some(send_data) = write.recv().await {
-            println!("send data {send_data:?}");
-
-            let mut raw_data: Vec<u8> = vec![69, 69];
-            raw_data.extend_from_slice(&send_data.msg_len.to_le_bytes());
-            raw_data.extend_from_slice(&send_data.msg_type.to_le_bytes());
-            raw_data.extend_from_slice(&send_data.data);
-
-            println!("send raw {raw_data:?}");
-
-            for i in 0..raw_data.len() {
-                port.write(&[raw_data[i]]).unwrap();
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-
-            println!("done sending");
-        }
-
-        /*
         // TODO busy polling, perhaps can seperate read and write to seperate tasks?
-        match port.read(serial_buf.as_mut_slice()) {
+        match port.lock().await.read(serial_buf.as_mut_slice()) {
             Ok(t) => {
-                if let Ok(data) = std::str::from_utf8(&serial_buf[..t]) {
-                    print!("{data}");
-                }
+                // if let Ok(data) = std::str::from_utf8(&serial_buf[..t]) {
+                //     print!("{data}");
+                // }
 
-                /*
                 msg.extend_from_slice(&serial_buf[..t]);
 
                 // wait for msg header to be read
@@ -175,11 +184,9 @@ async fn serial_conn(read: mpsc::Sender<SerialMessage>, mut write: mpsc::Receive
 
                 // finished processing
                 msg.drain(..START_MSG_BYTES + LENGTH_BYTES + TYPE_BYTES + msg_len as usize);
-                */
             },
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => (),
             Err(e) => eprintln!("{:?}", e),
         }
-        */
     }
 }

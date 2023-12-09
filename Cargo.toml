@@ -21,3 +21,4 @@ tokio-tungstenite = { version = "0.20" }
 futures-util = { version = "0.3" }
 
 dotenv = { version = "0.15" }
+anyhow = "1"

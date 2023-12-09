@@ -11,26 +11,26 @@ pub enum MsgType {
 #[repr(C)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SensorMsg {
-    train: u64,
-    sensor_id: u64,
+    pub train: u64,
+    pub sensor_id: u64,
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SwitchMsg {
-    state: [u16; 5],
+    pub state: [u16; 5],
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetTrainSpeedMsg {
-    train: u64,
-    speed: u64,
+    pub train: u64,
+    pub speed: u64,
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetSwitchMsg {
-    switch_id: u64,
-    state: bool,
+    pub switch_id: u64,
+    pub state: bool,
 }
