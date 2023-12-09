@@ -28,9 +28,9 @@ pub struct SetTrainSpeedMsg {
     pub speed: u64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetSwitchMsg {
     pub switch_id: u64,
-    pub state: bool,
+    pub state: u8,
 }

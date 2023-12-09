@@ -67,6 +67,18 @@ async fn main() {
                             };
 
                             write_serial_tx.send(serial_msg).await.unwrap();
+                        } else if msg_type == MsgType::SetSwitch as u32 {
+                            let switch_msg: SetSwitchMsg =
+                                serde_json::from_value(value.get("data").unwrap().clone()).unwrap();
+                            println!("parsed {switch_msg:?}");
+
+                            let serial_msg = SerialMessage {
+                                data: bincode::serialize(&switch_msg).unwrap(),
+                                msg_type,
+                                msg_len: std::mem::size_of::<SetSwitchMsg>() as u32,
+                            };
+
+                            write_serial_tx.send(serial_msg).await.unwrap();
                         } else {
                             eprintln!("invalid msg type from server {msg_type}");
                         }
